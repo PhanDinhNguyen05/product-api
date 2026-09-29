@@ -1,0 +1,89 @@
+name: Product API CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Lay ma nguon
+        uses: actions/checkout@v6
+
+      - name: Tao cau hinh va volume cho CI
+        run: |
+          cat > .env.ci <<'EOF'
+          PORT=3000
+          MONGODB_URI=mongodb://nammongodb:27017/productdb_ci
+          MONGO_VOLUME=product_ci_data
+          EOF
+
+          docker volume create product_ci_data
+
+      - name: Kiem tra cau hinh Compose
+        run: docker compose --env-file .env.ci config --quiet
+
+      - name: Build va khoi dong he thong
+        run: |
+          docker compose --env-file .env.ci up -d --build --wait --wait-timeout 120
+
+      - name: Test health endpoint
+        run: |
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:3000/health \
+            -o health.json
+
+          cat health.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("health.json") as file:
+              data = json.load(file)
+
+          assert data["status"] == "healthy", data
+          assert data["api"] == "up", data
+          assert data["mongodb"] == "up", data
+
+          print("PASS: API va MongoDB healthy")
+          PY
+
+      - name: Test lay danh sach san pham
+        run: |
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:3000/api/products \
+            -o products.json
+
+          cat products.json
+
+          python3 - <<'PY'
+          import json
+
+          with open("products.json") as file:
+              data = json.load(file)
+
+          assert isinstance(data, list), data
+
+          print("PASS: API tra ve danh sach san pham")
+          PY
+
+      - name: Hien thi trang thai va log
+        if: always()
+        run: |
+          docker compose --env-file .env.ci ps -a
+          docker compose --env-file .env.ci logs --no-color --tail 100
+
+      - name: Don dep moi truong CI
+        if: always()
+        run: |
+          docker compose --env-file .env.ci down
+          docker volume rm product_ci_data
