@@ -1,0 +1,49 @@
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: nammongodb
+    restart: unless-stopped
+
+    volumes:
+      - mongodb_data:/data/db
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  api:
+    image: "${PRODUCT_API_IMAGE:?Chua khai bao PRODUCT_API_IMAGE}"
+    container_name: product-api
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      PORT: "${PORT:?Chua khai bao PORT}"
+      MONGODB_URI: "${MONGODB_URI:?Chua khai bao MONGODB_URI}"
+
+    ports:
+      - "127.0.0.1:${PORT}:${PORT}"
+
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.js"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  mongodb_data:
+    external: true
+    name: "${MONGO_VOLUME:?Chua khai bao MONGO_VOLUME}"
