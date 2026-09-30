@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 jobs:
+
   crud-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -400,3 +401,119 @@ jobs:
         run: |
           docker compose --env-file .env.ci down
           docker volume rm product_crud_ci_data
+  deploy-local:
+    name: Deploy to local Docker Engine
+    needs: crud-test
+
+    if: >-
+      success() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       github.event_name == 'workflow_dispatch')
+
+    runs-on: [self-hosted, Windows, X64, product-api-local]
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        shell: powershell
+
+    env:
+      DEPLOY_DIR: ${{ vars.PROD_DEPLOY_DIR }}
+      PRODUCT_API_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/product-api:sha-${{ github.sha }}
+
+    steps:
+      - name: Check local deployment environment
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:DEPLOY_DIR)) {
+            throw "Missing repository variable PROD_DEPLOY_DIR"
+          }
+
+          if (-not (Test-Path -LiteralPath $env:DEPLOY_DIR)) {
+            throw "Deployment directory does not exist"
+          }
+
+          Set-Location -LiteralPath $env:DEPLOY_DIR
+
+          foreach ($file in @("docker-compose-prod.yaml", ".env.prod")) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "Missing deployment file: $file"
+            }
+          }
+
+          docker info
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot connect to local Docker Engine"
+          }
+
+          docker compose --env-file .env.prod -f docker-compose-prod.yaml config --quiet
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invalid production Compose configuration"
+          }
+
+      - name: Pull and deploy tested image
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -LiteralPath $env:DEPLOY_DIR
+
+          # Download the exact image published by the CI job.
+          docker compose --env-file .env.prod -f docker-compose-prod.yaml pull api
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot pull the published API image"
+          }
+
+          # Recreate services when needed and wait for healthchecks.
+          docker compose --env-file .env.prod -f docker-compose-prod.yaml up -d --no-build --wait --wait-timeout 120
+          if ($LASTEXITCODE -ne 0) {
+            throw "Deployment failed or services are not healthy"
+          }
+
+          # Confirm the running API uses the expected image reference.
+          $actualImage = docker inspect --format '{{.Config.Image}}' product-api
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot inspect API container"
+          }
+
+          if ($actualImage.Trim() -ne $env:PRODUCT_API_IMAGE) {
+            throw "Running API image does not match this workflow commit"
+          }
+
+          # Perform an immediate HTTP + MongoDB healthcheck.
+          docker compose --env-file .env.prod -f docker-compose-prod.yaml exec -T api node src/healthcheck.js
+          if ($LASTEXITCODE -ne 0) {
+            throw "API or MongoDB healthcheck failed"
+          }
+
+          # Persist the successful image tag for later manual Compose commands.
+          $envPath = Join-Path $env:DEPLOY_DIR ".env.prod"
+          $lines = [System.IO.File]::ReadAllLines($envPath)
+          $newLines = @(
+            $lines | Where-Object {
+              $_ -notmatch '^\s*PRODUCT_API_IMAGE\s*='
+            }
+          )
+          $newLines += "PRODUCT_API_IMAGE=$env:PRODUCT_API_IMAGE"
+
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllLines($envPath, $newLines, $utf8)
+
+          Write-Host "PASS: Local deployment is healthy"
+          Write-Host "PASS: Running image matches the published commit"
+
+      - name: Show local status and logs
+        if: always()
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:DEPLOY_DIR)) {
+            if (Test-Path -LiteralPath $env:DEPLOY_DIR) {
+              Set-Location -LiteralPath $env:DEPLOY_DIR
+
+              if ((Test-Path ".env.prod") -and (Test-Path "docker-compose-prod.yaml")) {
+                docker compose --env-file .env.prod -f docker-compose-prod.yaml ps -a
+                docker compose --env-file .env.prod -f docker-compose-prod.yaml logs --no-color --tail 50 api
+              }
+            }
+          }
