@@ -30,7 +30,7 @@ function validateProduct(req, res, next) {
   if (
     typeof price !== "number" ||
     !Number.isFinite(price) ||
-    price <= 0
+    price < 0
   ) {
     return res.status(400).json({
       message: "price phải là số hữu hạn lớn hơn hoặc bằng 0",
