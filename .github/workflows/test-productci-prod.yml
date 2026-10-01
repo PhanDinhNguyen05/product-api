@@ -1,25 +1,19 @@
 name: Product API CI-CD Docker Hub
-
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-
   crud-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout source code
         uses: actions/checkout@v6
-
       - name: Prepare isolated CI environment
         run: |
           cat > .env.ci <<'EOF'
@@ -27,22 +21,17 @@ jobs:
           MONGODB_URI=mongodb://nammongodb:27017/productdb_ci
           MONGO_VOLUME=product_crud_ci_data
           EOF
-
           docker volume create product_crud_ci_data
-
       - name: Validate Docker Compose
         run: docker compose --env-file .env.ci config --quiet
-
       - name: Build production image and start services
         run: |
           docker compose --env-file .env.ci up \
             -d --build --wait --wait-timeout 120
-
       - name: Verify production mode
         run: |
           docker compose --env-file .env.ci exec -T api \
             node -e 'if (process.env.NODE_ENV !== "production") process.exit(1); console.log("NODE_ENV=production");'
-
       - name: Run CRUD integration tests
         run: |
           python3 - <<'PY'
@@ -51,36 +40,29 @@ jobs:
           import unittest
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError
-
           BASE_URL = "http://127.0.0.1:3000"
           PRODUCTS = "/api/products"
-
           SAMPLE = {
               "pid": "CI_P001",
               "pname": "Ban phim",
               "price": 350000,
               "quantity": 10,
           }
-
-
           def request(method, path, body=None, raw=None):
               data = None
               headers = {}
-
               if raw is not None:
                   data = raw.encode("utf-8")
                   headers["Content-Type"] = "application/json"
               elif body is not None:
                   data = json.dumps(body).encode("utf-8")
                   headers["Content-Type"] = "application/json"
-
               req = Request(
                   BASE_URL + path,
                   data=data,
                   headers=headers,
                   method=method,
               )
-
               try:
                   with urlopen(req, timeout=10) as response:
                       return (
@@ -92,8 +74,6 @@ jobs:
                       error.code,
                       json.loads(error.read().decode("utf-8")),
                   )
-
-
           def mongo(expression):
               # Truy van dung database CI trong container MongoDB.
               command = [
@@ -104,7 +84,6 @@ jobs:
                   "--quiet", "--eval",
                   f"print(JSON.stringify({expression}))",
               ]
-
               result = subprocess.run(
                   command,
                   check=True,
@@ -112,41 +91,29 @@ jobs:
                   text=True,
                   timeout=20,
               )
-
               return json.loads(result.stdout.strip())
-
-
           def database_products():
               return mongo(
                   "db.products.find({}, {_id: 0}).sort({pid: 1}).toArray()"
               )
-
-
           def product_fields(product):
               return {
                   key: product[key]
                   for key in ("pid", "pname", "price", "quantity")
               }
-
-
           class ProductIntegrationTests(unittest.TestCase):
               def setUp(self):
                   # Moi test doc lap. Chi xoa collection trong productdb_ci.
                   mongo("db.products.deleteMany({})")
-
               def create_product(self, product=None):
                   product = SAMPLE.copy() if product is None else product
                   status, body = request("POST", PRODUCTS, product)
-
                   self.assertEqual(status, 201, body)
                   self.assertEqual(product_fields(body), product)
                   self.assertIn("_id", body)
-
                   return body
-
               def test_health(self):
                   status, body = request("GET", "/health")
-
                   self.assertEqual(status, 200, body)
                   self.assertEqual(body["status"], "healthy")
                   self.assertEqual(body["api"], "up")
@@ -155,33 +122,26 @@ jobs:
                       mongo("db.adminCommand({ping: 1}).ok"),
                       1,
                   )
-
               def test_empty_product_list(self):
                   status, body = request("GET", PRODUCTS)
-
                   self.assertEqual(status, 200, body)
                   self.assertEqual(body, [])
                   self.assertEqual(database_products(), [])
-
               def test_complete_crud_and_database(self):
                   # CREATE: API tra dung du lieu, MongoDB luu dung.
                   created = self.create_product()
                   self.assertEqual(database_products(), [SAMPLE])
-
                   # READ: lay danh sach.
                   status, body = request("GET", PRODUCTS)
                   self.assertEqual(status, 200, body)
                   self.assertEqual(len(body), 1)
                   self.assertEqual(product_fields(body[0]), SAMPLE)
-
                   # READ: lay chi tiet theo pid.
                   path = PRODUCTS + "/" + SAMPLE["pid"]
                   status, body = request("GET", path)
-
                   self.assertEqual(status, 200, body)
                   self.assertEqual(product_fields(body), SAMPLE)
                   self.assertEqual(body["_id"], created["_id"])
-
                   # UPDATE: gui du bon truong theo API hien tai.
                   updated = {
                       **SAMPLE,
@@ -189,40 +149,29 @@ jobs:
                       "price": 450000,
                       "quantity": 15,
                   }
-
                   status, body = request("PUT", path, updated)
-
                   self.assertEqual(status, 200, body)
                   self.assertEqual(product_fields(body), updated)
                   self.assertEqual(body["_id"], created["_id"])
                   self.assertEqual(database_products(), [updated])
-
                   status, body = request("GET", path)
                   self.assertEqual(status, 200, body)
                   self.assertEqual(product_fields(body), updated)
-
                   # DELETE: xoa qua API, kiem tra truc tiep MongoDB.
                   status, body = request("DELETE", path)
-
                   self.assertEqual(status, 200, body)
                   self.assertEqual(body["pid"], SAMPLE["pid"])
                   self.assertEqual(database_products(), [])
-
                   status, body = request("GET", path)
                   self.assertEqual(status, 404, body)
-
               def test_duplicate_pid_returns_409(self):
                   self.create_product()
-
                   status, body = request("POST", PRODUCTS, SAMPLE)
-
                   self.assertEqual(status, 409, body)
                   self.assertEqual(database_products(), [SAMPLE])
-
               def test_invalid_create_returns_400(self):
                   missing_name = SAMPLE.copy()
                   del missing_name["pname"]
-
                   cases = [
                       ("missing pname", missing_name),
                       ("empty pid", {**SAMPLE, "pid": "  "}),
@@ -233,125 +182,95 @@ jobs:
                       ("fraction quantity", {**SAMPLE, "quantity": 1.5}),
                       ("string quantity", {**SAMPLE, "quantity": "10"}),
                   ]
-
                   for label, payload in cases:
                       with self.subTest(case=label):
                           status, body = request("POST", PRODUCTS, payload)
-
                           self.assertEqual(status, 400, body)
                           self.assertEqual(database_products(), [])
-
               def test_invalid_update_keeps_database_unchanged(self):
                   self.create_product()
                   path = PRODUCTS + "/" + SAMPLE["pid"]
-
                   cases = [
                       {**SAMPLE, "price": -1},
                       {**SAMPLE, "quantity": 1.5},
                       {**SAMPLE, "pname": ""},
                       {"price": 100},
                   ]
-
                   for payload in cases:
                       with self.subTest(payload=payload):
                           status, body = request("PUT", path, payload)
-
                           self.assertEqual(status, 400, body)
                           self.assertEqual(database_products(), [SAMPLE])
-
               def test_update_to_duplicate_pid_returns_409(self):
                   self.create_product()
-
                   second = {**SAMPLE, "pid": "CI_P002"}
                   self.create_product(second)
-
                   status, body = request(
                       "PUT",
                       PRODUCTS + "/CI_P002",
                       {**second, "pid": "CI_P001"},
                   )
-
                   self.assertEqual(status, 409, body)
                   self.assertEqual(
                       database_products(),
                       [SAMPLE, second],
                   )
-
               def test_missing_product_returns_404(self):
                   path = PRODUCTS + "/NOT_FOUND"
-
                   for method in ("GET", "PUT", "DELETE"):
                       with self.subTest(method=method):
                           payload = SAMPLE if method == "PUT" else None
                           status, body = request(method, path, payload)
-
                           self.assertEqual(status, 404, body)
                           self.assertEqual(database_products(), [])
-
               def test_zero_price_and_quantity_are_valid(self):
                   product = {
                       **SAMPLE,
                       "price": 0,
                       "quantity": 0,
                   }
-
                   self.create_product(product)
                   self.assertEqual(database_products(), [product])
-
               def test_malformed_json_returns_400(self):
                   status, body = request(
                       "POST",
                       PRODUCTS,
                       raw='{"pid":',
                   )
-
                   self.assertEqual(status, 400, body)
                   self.assertEqual(database_products(), [])
-
-
           unittest.main(verbosity=2)
           PY
       - name: Final healthcheck gate
         run: |
           set -euo pipefail
-
           docker compose --env-file .env.ci exec -T mongodb \
             mongosh --quiet --eval \
             'quit(db.adminCommand({ping: 1}).ok === 1 ? 0 : 1)'
-
           docker compose --env-file .env.ci exec -T api \
             node src/healthcheck.js
-
           for container in nammongodb product-api; do
             health_status=$(docker inspect \
               --format '{{.State.Health.Status}}' "$container")
-
             echo "$container: $health_status"
-
             if [ "$health_status" != "healthy" ]; then
               echo "Healthcheck failed: $container"
               exit 1
             fi
           done
-
           docker image inspect product-api:1.0 \
             --format '{{json .Config.Healthcheck}}' \
             > image-healthcheck.json
-
           python3 - <<'PY'
           import json
-
           with open("image-healthcheck.json") as file:
               healthcheck = json.load(file)
-
           assert healthcheck, "Image does not contain HEALTHCHECK"
           assert healthcheck["Test"] == [
               "CMD", "node", "src/healthcheck.js"
           ], healthcheck
-
           print("PASS: image contains the expected HEALTHCHECK")
           PY
-
       - name: Login to Docker Hub
         if: >-
           success() &&
@@ -362,7 +281,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Publish tested image to Docker Hub
         if: >-
           success() &&
@@ -373,16 +291,12 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
-
           image_name="${DOCKERHUB_USERNAME}/product-api"
           image_tag="sha-${GITHUB_SHA}"
-
           tested_image_id=$(docker inspect \
             --format '{{.Image}}' product-api)
-
           docker tag "$tested_image_id" "$image_name:$image_tag"
           docker push "$image_name:$image_tag"
-
           {
             echo "### Docker Hub publication"
             echo ""
@@ -395,7 +309,6 @@ jobs:
         run: |
           docker compose --env-file .env.ci ps -a
           docker compose --env-file .env.ci logs --no-color --tail 100
-
       - name: Clean up CI resources
         if: always()
         run: |
@@ -404,88 +317,66 @@ jobs:
   deploy-local:
     name: Deploy to local Docker Engine
     needs: crud-test
-
-    if: >-
-      success() &&
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' ||
-       github.event_name == 'workflow_dispatch')
-
+    if: ${{ false }}
     runs-on: [self-hosted, Windows, X64, product-api-local]
     timeout-minutes: 10
-
     defaults:
       run:
         shell: powershell
-
     env:
       DEPLOY_DIR: ${{ vars.PROD_DEPLOY_DIR }}
       PRODUCT_API_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/product-api:sha-${{ github.sha }}
-
     steps:
       - name: Check local deployment environment
         run: |
           $ErrorActionPreference = "Stop"
-
           if ([string]::IsNullOrWhiteSpace($env:DEPLOY_DIR)) {
             throw "Missing repository variable PROD_DEPLOY_DIR"
           }
-
           if (-not (Test-Path -LiteralPath $env:DEPLOY_DIR)) {
             throw "Deployment directory does not exist"
           }
-
           Set-Location -LiteralPath $env:DEPLOY_DIR
-
           foreach ($file in @("docker-compose-prod.yaml", ".env.prod")) {
             if (-not (Test-Path -LiteralPath $file)) {
               throw "Missing deployment file: $file"
             }
           }
-
           docker info
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot connect to local Docker Engine"
           }
-
           docker compose --env-file .env.prod -f docker-compose-prod.yaml config --quiet
           if ($LASTEXITCODE -ne 0) {
             throw "Invalid production Compose configuration"
           }
-
       - name: Pull and deploy tested image
         run: |
           $ErrorActionPreference = "Stop"
           Set-Location -LiteralPath $env:DEPLOY_DIR
-
           # Download the exact image published by the CI job.
           docker compose --env-file .env.prod -f docker-compose-prod.yaml pull api
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot pull the published API image"
           }
-
           # Recreate services when needed and wait for healthchecks.
           docker compose --env-file .env.prod -f docker-compose-prod.yaml up -d --no-build --wait --wait-timeout 120
           if ($LASTEXITCODE -ne 0) {
             throw "Deployment failed or services are not healthy"
           }
-
           # Confirm the running API uses the expected image reference.
           $actualImage = docker inspect --format '{{.Config.Image}}' product-api
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot inspect API container"
           }
-
           if ($actualImage.Trim() -ne $env:PRODUCT_API_IMAGE) {
             throw "Running API image does not match this workflow commit"
           }
-
           # Perform an immediate HTTP + MongoDB healthcheck.
           docker compose --env-file .env.prod -f docker-compose-prod.yaml exec -T api node src/healthcheck.js
           if ($LASTEXITCODE -ne 0) {
             throw "API or MongoDB healthcheck failed"
           }
-
           # Persist the successful image tag for later manual Compose commands.
           $envPath = Join-Path $env:DEPLOY_DIR ".env.prod"
           $lines = [System.IO.File]::ReadAllLines($envPath)
@@ -495,22 +386,17 @@ jobs:
             }
           )
           $newLines += "PRODUCT_API_IMAGE=$env:PRODUCT_API_IMAGE"
-
           $utf8 = New-Object System.Text.UTF8Encoding($false)
           [System.IO.File]::WriteAllLines($envPath, $newLines, $utf8)
-
           Write-Host "PASS: Local deployment is healthy"
           Write-Host "PASS: Running image matches the published commit"
-
       - name: Show local status and logs
         if: always()
         run: |
           $ErrorActionPreference = "Stop"
-
           if (-not [string]::IsNullOrWhiteSpace($env:DEPLOY_DIR)) {
             if (Test-Path -LiteralPath $env:DEPLOY_DIR) {
               Set-Location -LiteralPath $env:DEPLOY_DIR
-
               if ((Test-Path ".env.prod") -and (Test-Path "docker-compose-prod.yaml")) {
                 docker compose --env-file .env.prod -f docker-compose-prod.yaml ps -a
                 docker compose --env-file .env.prod -f docker-compose-prod.yaml logs --no-color --tail 50 api
