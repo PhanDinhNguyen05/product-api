@@ -27,7 +27,7 @@ async function startServer() {
   // Đợi tạo chỉ mục unique cho pid trước khi nhận request.
   await Product.init();
 
-  console.log("Đã kết nối MongoDBa");
+  console.log("Đã kết nối MongoDB");
   console.log(`Database: ${mongoose.connection.name}`);
 
   app.listen(port, (error) => {

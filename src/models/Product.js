@@ -10,7 +10,7 @@ const productSchema = new mongoose.Schema(
     },
     pname: {
       type: String,
-      required: [true, "pname là bắt buộc"],
+      required: [false, "pname là bắt buộc"],
       trim: true,
     },
     price: {
