@@ -27,7 +27,7 @@ app.get("/health", async (req, res) => {
     });
 
     if (result.ok !== 1) {
-      throw new Error("MongoDB ping thất bại!!");
+      throw new Error("MongoDB ping thất bại");
     }
 
     return res.status(200).json({
