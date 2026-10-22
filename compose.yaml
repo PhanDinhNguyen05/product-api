@@ -30,7 +30,7 @@ services:
 
     environment:
       PORT: "${PORT:?Chua khai bao PORT}"
-      MONGODB_URI: "${MONGODB_URI:?Chua khai bao MONGODB_URI}"
+      MONGODB_URI: "${MONGODB_URI:?Chua khai baoo MONGODB_URI}"
 
     ports:
       - "127.0.0.1:${PORT}:${PORT}"
