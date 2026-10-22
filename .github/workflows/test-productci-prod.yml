@@ -20,6 +20,7 @@ jobs:
           PORT=3000
           MONGODB_URI=mongodb://nammongodb:27017/productdb_ci
           MONGO_VOLUME=product_crud_ci_data
+          MONGO_IMAGE=mongo:7.0
           EOF
           docker volume create product_crud_ci_data
       - name: Validate Docker Compose

@@ -1,6 +1,6 @@
 services:
   mongodb:
-    image: mongo:8.0
+    image: "${MONGO_IMAGE:-mongo:8.0}"
     container_name: nammongodb
     restart: unless-stopped
 
@@ -49,4 +49,4 @@ services:
 volumes:
   mongodb_data:
     external: true
-    name: "${MONGO_VOLUME:?Chua khai baoooo MONGO_VOLUME}"
+    name: "${MONGO_VOLUME:?Chua khai baooo MONGO_VOLUME}"
