@@ -49,4 +49,4 @@ services:
 volumes:
   mongodb_data:
     external: true
-    name: "${MONGO_VOLUME:?Chua khai baooo MONGO_VOLUME}"
+    name: "${MONGO_VOLUME:?Chua khai baoo MONGO_VOLUME}"
